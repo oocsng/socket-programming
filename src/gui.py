@@ -1,6 +1,6 @@
 # Tkinter GUI and message queue
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, ttk, filedialog
 
 # Create the main window
 root = tk.Tk()
@@ -166,6 +166,80 @@ display_message(
 display_message("[14:21] You", "I have, want me to send it to you?")
 display_message("[System]", "Minh is ready to receive the file...")
 
+# ---------- Bottom layer (File sending and input bar)--------------
+bottom_container = tk.Frame(right_frame, bg="#ffffff")
+bottom_container.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 10))
+
+# File-transfer-progress area
+progress_frame = tk.Frame(bottom_container, bg="#ffffff")
+progress_frame.pack(fill=tk.X, pady=(0, 6))
+
+
+lbl_progress = tk.Label(
+    progress_frame,
+    text="File transfer: network_report.pdf (70% - 2.1 MB /  3.0 MB)",
+    font=("Segoe UI", 9, "italic"),
+    bg="#ffffff",
+    fg="#4a5568",
+    anchor="w",
+)
+lbl_progress.pack(fill=tk.X)
+
+# Progression bar, determinate-mode (0 to 100 percent*)
+progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate")
+progress_bar.pack(fill=tk.X, pady=(2, 0))
+progress_bar["value"] = 70  # placeholder
+
+# User Input box and clickable buttons
+input_frame = tk.Frame(bottom_container, bg="#ffffff")
+input_frame.pack(fill=tk.X)
+
+
+# send_file function
+def send_file():
+    filepath = filedialog.askopenfilename()
+    if filepath:
+        filename = filepath.split("/")[-1]  # grab file name
+        display_message("[System]", f"You selected file: {filename}")
+
+
+btn_file = tk.Button(
+    input_frame,
+    text="Send file",
+    command=send_file,
+    font=("Segoe UI", 9),
+    bg="#edf2f7",
+    relief=tk.GROOVE,
+)
+btn_file.pack(side=tk.LEFT, padx=(0, 6))
+
+# Text input box (one line)
+ent_message = tk.Entry(input_frame, font=("Segoe UI", 10))
+ent_message.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6), ipady=3)
+
+
+# send_message function
+def send_message():
+    msg = ent_message.get().strip()
+    if msg:
+        display_message("[You]", msg)
+        ent_message.delete(0, tk.END)  # delete message box for next input
+
+
+btn_send = tk.Button(
+    input_frame,
+    text="Send",
+    command=send_message,
+    font=("Segoe UI", 9, "bold"),
+    bg="#2b6cb0",
+    fg="#ffffff",
+    padx=12,
+    relief=tk.FLAT,
+)
+btn_send.pack(side=tk.RIGHT)
+
+# bind enter to execute send_message function
+ent_message.bind("<Return>", lambda event: send_message())
 
 # Start the GUI
 root.mainloop()

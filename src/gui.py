@@ -1,6 +1,6 @@
 # Tkinter GUI and message queue
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, ttk, filedialog
 
 # Create the main window
 root = tk.Tk()
@@ -165,6 +165,144 @@ display_message(
 )
 display_message("[14:21] You", "I have, want me to send it to you?")
 display_message("[System]", "Minh is ready to receive the file...")
+
+# ---------- Bottom layer (File sending and input bar)--------------
+bottom_container = tk.Frame(right_frame, bg="#ffffff")
+bottom_container.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 10))
+
+# File-transfer-progress area
+progress_frame = tk.Frame(bottom_container, bg="#ffffff")
+progress_frame.pack(fill=tk.X, pady=(0, 6))
+
+
+lbl_progress = tk.Label(
+    progress_frame,
+    text="File transfer: network_report.pdf (70% - 2.1 MB /  3.0 MB)",
+    font=("Segoe UI", 9, "italic"),
+    bg="#ffffff",
+    fg="#4a5568",
+    anchor="w",
+)
+lbl_progress.pack(fill=tk.X)
+
+# Progression bar, determinate-mode (0 to 100 percent*)
+progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate")
+progress_bar.pack(fill=tk.X, pady=(2, 0))
+progress_bar["value"] = 70  # placeholder
+
+# User Input box and clickable buttons
+input_frame = tk.Frame(bottom_container, bg="#ffffff")
+input_frame.pack(fill=tk.X)
+
+
+# send_file function
+def send_file():
+    filepath = filedialog.askopenfilename()
+    if filepath:
+        filename = filepath.split("/")[-1]  # grab file name
+        display_message("[System]", f"You selected file: {filename}")
+
+
+btn_file = tk.Button(
+    input_frame,
+    text="Send file",
+    command=send_file,
+    font=("Segoe UI", 9),
+    bg="#edf2f7",
+    relief=tk.GROOVE,
+)
+btn_file.pack(side=tk.LEFT, padx=(0, 6))
+
+# Text input box (one line)
+ent_message = tk.Entry(input_frame, font=("Segoe UI", 10))
+ent_message.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6), ipady=3)
+
+
+# send_message function
+def send_message():
+    msg = ent_message.get().strip()
+    if msg:
+        display_message("[You]", msg)
+
+        # Save into the current chatting peer's chat history
+        if current_chat_partner in chat_histories:
+            chat_histories[current_chat_partner].append(("[You]", msg))
+
+        ent_message.delete(0, tk.END)  # delete message box for next input
+
+
+btn_send = tk.Button(
+    input_frame,
+    text="Send",
+    command=send_message,
+    font=("Segoe UI", 9, "bold"),
+    bg="#2b6cb0",
+    fg="#ffffff",
+    padx=12,
+    relief=tk.FLAT,
+)
+btn_send.pack(side=tk.RIGHT)
+
+# bind enter to execute send_message function
+ent_message.bind("<Return>", lambda event: send_message())
+
+# -------------- Chat history and peer selection --------------------
+
+# Implement *Dictionary* to store each peer's chat history
+# Structure: { "Name": [list of messages]}
+
+chat_histories = {  ## placeholders
+    "Minh": [
+        ("[14:20] Minh", "Hey Quan, have you finished preparing the report file yet?"),
+        ("[14:21] You", "I have, want me to send it to you?"),
+        ("[System]", "Minh is ready to receive the file..."),
+    ],
+    "Huy": [
+        ("[13:00] Huy", "Chào Quan, chiều nay mấy giờ nhóm mình họp thế?"),
+        ("[13:02] You", "Tầm 3 giờ chiều nhé Huy!"),
+    ],
+}
+
+# Variable to remember which person you last opened a conversation with
+current_chat_partner = "Minh"
+
+
+# on_select_partner function (mouse click event)
+def on_select_partner(event):
+    global current_chat_partner
+
+    # Take the index of the current selected line in Listbox
+    selected_indices = peer_listbox.curselection()
+
+    if not selected_indices:
+        return
+
+    # Extract string, for example: "Minh (192.168.1.12:6000) [Active] (2)"
+    selected_text = peer_listbox.get(selected_indices[0])
+
+    # Extract name (first index before the "space")
+    partner_name = selected_text.split(" ")[0]
+    current_chat_partner = partner_name
+
+    # Update chat header label on the top on the chat box (current chatting with ... )
+    lbl_chat_header.config(text=f"Currently chatting with: {selected_text}")
+
+    # Clear the current chat area to blank (and to paste in current-selected-peer's chat history if there is any)
+    chat_area.config(state="normal")
+    chat_area.delete("1.0", tk.END)  # remove from line 1, 0th index
+    chat_area.config(state="disabled")
+
+    # Paste in chat history of selected peer (if there is any)
+    if partner_name in chat_histories:
+        for sender, msg in chat_histories[partner_name]:
+            display_message(sender, msg)
+    else:  # empty history
+        chat_histories[partner_name] = []
+        display_message("[System]", f"Start a new conversation with {partner_name}.")
+
+
+# Bind left mouse click to Listbox elements
+peer_listbox.bind("<<ListboxSelect>>", on_select_partner)
 
 
 # Start the GUI

@@ -1,6 +1,103 @@
 # Tkinter GUI and message queue
 import tkinter as tk
 from tkinter import ttk, scrolledtext, ttk, filedialog
+import queue
+import random  # for port
+import sys
+
+# -------- Login box -------------
+
+
+def get_user_config():
+    login_win = tk.Tk()
+    login_win.title("Login - LAN Chat")
+    login_win.geometry("360x260")
+    login_win.resizable(False, False)  # lock the window
+
+    result = {"name": None, "port": None}
+
+    # Username input
+    tk.Label(login_win, text="Username", font=("Segoe UI", 10, "bold")).pack(
+        anchor="w", padx=20, pady=(15, 2)
+    )
+    ent_name = tk.Entry(login_win, font=("Segoe UI", 10))
+    ent_name.pack(fill=tk.X, padx=20, ipady=3)
+    ent_name.focus()  # place cursor on input box
+
+    # TPC-Port Input + Randomizer
+    tk.Label(
+        login_win, text="TCP Port (1024 - 65535):", font=("Segoe UI", 10, "bold")
+    ).pack(anchor="w", padx=20, pady=(10, 2))
+    port_frame = tk.Frame(login_win)
+    port_frame.pack(fill=tk.X, padx=20)
+
+    ent_port = tk.Entry(port_frame, font=("Segoe UI", 10))
+    ent_port.insert(0, "5000")  # default TCP-port to 5000
+    ent_port.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
+
+    def port_randomizer():
+        ent_port.delete(0, tk.END)
+        ent_port.insert(0, str(random.randint(5000, 9000)))
+
+    btn_random = tk.Button(
+        port_frame, text="Random", command=port_randomizer, font=("Segoe UI", 9), padx=8
+    )
+    btn_random.pack(side=tk.RIGHT, padx=(6, 0))
+
+    # Error label (left blank by default)
+    lbl_error = tk.Label(login_win, text="", font=("Segoe UI", 9), fg="#c53030")
+    lbl_error.pack(pady=(6, 0))
+
+    # check-input function and confirmation
+    def submit():
+        name = ent_name.get().strip()
+        port_str = ent_port.get().strip()
+
+        # Gate 1: Username mustn't be blank
+        if not name:
+            lbl_error.config(text="Username can not be empty.")
+            return
+        # Gate 2: Prohibit '|' in username as it is a divider of the protocol
+        if "|" in name:
+            lbl_error.config(text="Username can not contain '|'.")
+            return
+        # Gate 3: Port has to be an integer in range [1024,65535]
+        try:
+            port = int(port_str)
+            if port < 1024 or port > 65535:
+                raise ValueError
+        except ValueError:
+            lbl_error.config(text="Port must be an integer in range [1024,65535].")
+            return
+        # if not stopped by any gate
+        result["name"] = name
+        result["port"] = port
+        login_win.destroy()
+
+    btn_start = tk.Button(
+        login_win,
+        text="Start chat",
+        command=submit,
+        font=("Segoe UI", 10, "bold"),
+        bg="#2b6cb0",
+        fg="#ffffff",
+        relief=tk.FLAT,
+        pady=4,
+    )
+    btn_start.pack(fill=tk.X, padx=20, pady=(8, 15))
+
+    # Pressing "enter" at username box or port box both confirms login
+    ent_name.bind("<Return>", lambda event: submit())
+    ent_port.bind("<Return>", lambda event: submit())
+
+    login_win.mainloop()
+    return result["name"], result["port"]
+
+
+# Call login box before main window
+my_name, my_port = get_user_config()
+if my_name is None:
+    sys.exit()  # if press X on top right corner, program stopped immediately
 
 # Create the main window
 root = tk.Tk()
@@ -40,7 +137,11 @@ profile_frame.pack(fill=tk.X, padx=10, pady=10)
 
 # Display name and TCP port (placeholder)
 lbl_user = tk.Label(
-    profile_frame, text="Name: Quan (Port: 5000)", font=("Segoe UI", 10), bg="#f0f2f5"
+    # profile_frame, text="Name: Quan (Port: 5000)", font=("Segoe UI", 10), bg="#f0f2f5"
+    profile_frame,
+    text=f"Name: {my_name} Port: {my_port}",
+    font=("Segoe UI", 10),
+    bg="#f0f2f5",
 )
 
 lbl_user.pack(anchor="w")
@@ -173,6 +274,7 @@ bottom_container.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 10))
 # File-transfer-progress area
 progress_frame = tk.Frame(bottom_container, bg="#ffffff")
 progress_frame.pack(fill=tk.X, pady=(0, 6))
+progress_frame.pack_forget()
 
 
 lbl_progress = tk.Label(
@@ -263,7 +365,7 @@ chat_histories = {  ## placeholders
     ],
 }
 
-# Variable to remember which person you last opened a conversation with
+# Variable to remember which person did user last open a conversation with
 current_chat_partner = "Minh"
 
 
@@ -277,12 +379,25 @@ def on_select_partner(event):
     if not selected_indices:
         return
 
+    index = selected_indices[0]  # Current index of the selected peer in Listbox
+
     # Extract string, for example: "Minh (192.168.1.12:6000) [Active] (2)"
     selected_text = peer_listbox.get(selected_indices[0])
 
     # Extract name (first index before the "space")
     partner_name = selected_text.split(" ")[0]
     current_chat_partner = partner_name
+
+    # Remove *Unread* messages icon:
+    # If it has unread messages icon, for example " (2) ", extract the "tail" of the string
+    if "(" in selected_text and selected_text.endswith(")"):
+        parts = selected_text.rsplit("(", 1)  # split from r to l
+        clean_text = parts[0].rstrip()
+        # Update in Listbox
+        peer_listbox.delete(index)
+        peer_listbox.insert(index, clean_text)
+        peer_listbox.select_set(index)
+        selected_text = clean_text
 
     # Update chat header label on the top on the chat box (current chatting with ... )
     lbl_chat_header.config(text=f"Currently chatting with: {selected_text}")
@@ -301,9 +416,170 @@ def on_select_partner(event):
         display_message("[System]", f"Start a new conversation with {partner_name}.")
 
 
+# receive_message_from_peer function
+def receive_message_from_peer(sender_name, text):
+    # Save the message into the sender's chat history with user
+    if sender_name not in chat_histories:
+        chat_histories[sender_name] = []
+    chat_histories[sender_name].append((f"[{sender_name}]", text))
+
+    # 1. If two peers are both chatting with each other
+    if sender_name == current_chat_partner:
+        display_message(f"[{sender_name}]", text)
+    # 2. If user is chatting with another peer (or haven't selected a peer to chat with)
+    else:
+        # find the index of in selected_indices of the sender to update *unread* messages
+        for i in range(peer_listbox.size()):
+            item_text = peer_listbox.get(i)
+            if item_text.startswith(sender_name):
+                # count current unread messages
+                unread_count = 1
+                if "(" in item_text and item_text.endswith(")"):
+                    try:  # add 1 to old unread-messages count
+                        old_count = int(item_text.rsplit("(", 1)[1].rstrip(")"))
+                        unread_count = old_count + 1
+                    except ValueError:
+                        unread_count = 1
+                    base_text = item_text.rsplit("(", 1)[0].rstrip()
+                else:
+                    base_text = item_text
+
+                # Update unread message count
+                peer_listbox.delete(i)
+                peer_listbox.insert(i, f"{base_text} ({unread_count})")
+                break  # PREVENT CHECKING OTHER PEOPLE IF NAME IS FOUND
+
+
 # Bind left mouse click to Listbox elements
 peer_listbox.bind("<<ListboxSelect>>", on_select_partner)
 
+# ----------------- File sending progress controller -------------------
 
+
+def update_file_progress(filename, percent, is_done=False):
+    # show progress bar if hidden
+    progress_frame.pack(fill=tk.X, pady=(0, 6), before=input_frame)
+
+    # update percentage-value on the progress bar (0 to 100)
+    progress_bar["value"] = percent
+
+    # update progress announcer
+    if is_done or percent >= 100:
+        lbl_progress.config(
+            text=f"Finished sending file: {filename}, (100%)", fg="#2e7d32"
+        )
+        # use root.after to set a timer for 1 second then hide the progress bar
+        root.after(1000, progress_frame.pack_forget)
+    else:
+        lbl_progress.config(text=f"Sending: {filename}, ({percent}%)", fg="#4a5568")
+
+
+# ------------------ Automatic peer-list updater --------------------
+
+
+def add_or_update_peer(name, ip, port, status):
+    # Standardize string format, for example "Minh (192.168.1.12:6000) [Active]"
+    new_entry = f"{name} ({ip}:{port}) [{status}]"
+
+    # check if peer already existed  in Listbox
+    found = False
+    for i in range(peer_listbox.size()):
+        item_text = peer_listbox.get(i)
+        if item_text.startswith(name):
+            # keep the unread messages (for example: (2))
+            unread_part = ""
+            if item_text.endswith(")") and not item_text.endswith(f"[{status}]"):
+                if "(" in item_text.rsplit("[", 1)[-1]:
+                    unread_part = " " + item_text.rsplit(" ", 1)[-1]
+            peer_listbox.delete(i)
+            peer_listbox.insert(i, new_entry + unread_part)
+            found = True
+            break
+    # if new LAN peer then add to bottom of Listbox
+    if not found:
+        peer_listbox.insert(tk.END, new_entry)
+        display_message(
+            "[System]", f"New peer joined the network: {name} ({ip}:{port})"
+        )
+
+
+def remove_peer(name):
+    for i in range(peer_listbox.size()):
+        if peer_listbox.get(i).startswith(name):
+            peer_listbox.delete(i)
+            display_message("[System]", f"{name} has left the network.")
+            break
+
+
+# ------------- Multi-threaded event queue ---------------------
+
+# Initialize queue
+event_queue = queue.Queue()
+
+
+# check_queue() function every 100ms
+def check_queue():
+    # get all elements in queue
+    while not event_queue.empty():
+        try:
+            # get an element out without stopping the program (get_nowait)
+            # each element is a pair of (event_type, data)
+            event_type, data = event_queue.get_nowait()
+
+            # 1. Event from UDP flow: New LAN peer joins or status switch
+            if event_type == "peer_update":
+                add_or_update_peer(
+                    data["name"], data["ip"], data["port"], data["status"]
+                )
+            # 2. Event from UDP flow: Connection lost over 10 seconds (Offline)
+            elif event_type == "peer_offline":
+                remove_peer(data["name"])
+            # 3. Event from TCP flow: New income message over TCP
+            elif event_type == "new_message":
+                receive_message_from_peer(data["sender"], data["text"])
+            # 4. Event from TCP flow: Update send/receive file progression
+            elif event_type == "file_progress":
+                update_file_progress(
+                    data["filename"], data["percent"], data.get("done", False)
+                )
+            # 5. Error events (connection lost, connection refused, file error)
+            elif event_type == "system_error":
+                display_message("[Error]", data["message"])
+        except queue.Empty:
+            break  # quit after having finished all elements in queue
+    # auto-call this function again after 100ms
+    root.after(100, check_queue)
+
+    # # placeholder test-------------------------------------
+    # root.after(
+    #     2000,
+    #     lambda: event_queue.put(
+    #         (
+    #             "peer_update",
+    #             {"name": "Lan", "ip": "192.168.1.30", "port": 7000, "status": "Active"},
+    #         )
+    #     ),
+    # )
+    # # Sau 4 giây: Giả lập Bạn B nhận được tin nhắn từ "Huy" (bạn sẽ thấy số chưa đọc của Huy nhảy lên (1))
+    # root.after(
+    #     4000,
+    #     lambda: event_queue.put(
+    #         (
+    #             "new_message",
+    #             {"sender": "Huy", "text": "Quan ơi nhận được tin nhắn qua Queue chưa?"},
+    #         )
+    #     ),
+    # )
+    # # Sau 6 giây: Giả lập Bạn B đang truyền file đạt 80%
+    # root.after(
+    #     6000,
+    #     lambda: event_queue.put(
+    #         ("file_progress", {"filename": "demo_socket.zip", "percent": 80, "done": False})
+    #     ),
+    # )
+
+
+# Start the queue check
+check_queue()
 # Start the GUI
 root.mainloop()

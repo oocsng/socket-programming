@@ -20,6 +20,9 @@ def main():
     def handle_status_change(new_status):
         print(f"[DEBUG -> UDP] Change status to: {new_status}")
 
+    def handle_leave_chat(partner_name, partner_addr):
+        print(f"[DEBUG -> TCP] Leave chat with {partner_name} {partner_addr}")
+
     def handle_close():
         print(f"[DEBUG -> SYSTEM] Closing socket and background resources...")
 
@@ -31,6 +34,7 @@ def main():
         on_send_msg=handle_send_msg,
         on_send_file=handle_send_file,
         on_status_change=handle_status_change,
+        on_leave_chat=handle_leave_chat,
         on_close=handle_close,
     )
 

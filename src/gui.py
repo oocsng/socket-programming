@@ -101,6 +101,7 @@ def start_gui(
     on_send_msg=None,
     on_send_file=None,
     on_status_change=None,
+    on_leave_chat=None,
     on_close=None,
 ):
 
@@ -151,8 +152,8 @@ def start_gui(
 
     lbl_user.pack(anchor="w")
 
-    # Create variable to manage status, initialized as "Active"
-    status_var = tk.StringVar(value="Status: Active")
+    # Create variable to manage status, initialized as "online"
+    status_var = tk.StringVar(value="Status: online")
 
     lbl_status = tk.Label(
         profile_frame,
@@ -166,22 +167,22 @@ def start_gui(
 
     # Define status toggler
     def toggle_status():
-        if "Active" in status_var.get():
-            new_status = "Away"
-            status_var.set("Status: Away")
+        if "online" in status_var.get():
+            new_status = "away"
+            status_var.set("Status: away")
             lbl_status.config(fg="#e65100")
-            btn_toggle.config(text="Switch to Active")
+            btn_toggle.config(text="Switch to online")
         else:
-            new_status = "Active"
-            status_var.set("Status: Active")
+            new_status = "online"
+            status_var.set("Status: online")
             lbl_status.config(fg="#2e7d32")
-            btn_toggle.config(text="Switch to Away")
+            btn_toggle.config(text="Switch to away")
         if on_status_change:
             on_status_change(new_status)
 
     btn_toggle = tk.Button(
         profile_frame,
-        text="Switch to Away",
+        text="Switch to away",
         command=toggle_status,
         font=("Segoe UI", 9),
     )
@@ -228,9 +229,12 @@ def start_gui(
 
     # ----------- Right frame: Chat box ---------------------
 
-    # Placeholder for display name and information of the peer currently chatting with (Current chatting with: Name (ip:tcp_port) [Status])
+    header_frame = tk.Frame(right_frame, bg="#ffffff")
+    header_frame.pack(fill=tk.X)
+
+    # Display name and information of the peer currently chatting with (Current chatting with: Name (ip:tcp_port) [Status])
     lbl_chat_header = tk.Label(
-        right_frame,
+        header_frame,
         text="Select a peer from the left list to start chatting",
         font=("Segoe UI", 11, "bold"),
         bg="#ffffff",
@@ -239,7 +243,34 @@ def start_gui(
         padx=15,
         pady=10,
     )
-    lbl_chat_header.pack(fill=tk.X)
+    lbl_chat_header.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    def leave_current_chat():
+        nonlocal current_chat_partner
+        if current_chat_partner is None:
+            return
+        partner = current_chat_partner
+        partner_addr = peer_addresses.get(partner)
+        current_chat_partner = None
+        peer_listbox.selection_clear(0, tk.END)
+        lbl_chat_header.config(text="Select a peer from the left list to start chatting")
+        btn_leave.config(state=tk.DISABLED)
+        display_message("[System]", f"Left chat with {partner}.")
+        if on_leave_chat:
+            on_leave_chat(partner, partner_addr)
+
+    btn_leave = tk.Button(
+        header_frame,
+        text="Leave Chat",
+        command=leave_current_chat,
+        font=("Segoe UI", 9),
+        bg="#edf2f7",
+        fg="#c53030",
+        relief=tk.GROOVE,
+        padx=10,
+        state=tk.DISABLED,
+    )
+    btn_leave.pack(side=tk.RIGHT, padx=(0, 12), pady=8)
 
     # Divider for chat box
     divider = tk.Frame(right_frame, height=1, bg="#e2e8f0")
@@ -390,6 +421,9 @@ def start_gui(
     # Variable to remember which person did user last open a conversation with
     current_chat_partner = None
 
+    def extract_peer_name(item_text):
+        return item_text.split(" (")[0]
+
     # on_select_partner function (mouse click event)
     def on_select_partner(event):
         nonlocal current_chat_partner
@@ -402,11 +436,11 @@ def start_gui(
 
         index = selected_indices[0]  # Current index of the selected peer in Listbox
 
-        # Extract string, for example: "Minh (192.168.1.12:6000) [Active] (2)"
+        # Extract string, for example: "Minh (192.168.1.12:6000) [online] (2)"
         selected_text = peer_listbox.get(selected_indices[0])
 
-        # Extract name (first index before the "space")
-        partner_name = selected_text.split(" (")[0]
+        # Extract name before IP/port block
+        partner_name = extract_peer_name(selected_text)
         current_chat_partner = partner_name
 
         # Remove *Unread* messages icon:
@@ -420,8 +454,9 @@ def start_gui(
             peer_listbox.select_set(index)
             selected_text = clean_text
 
-        # Update chat header label on the top on the chat box (current chatting with ... )
+        # Update chat header label and enable Leave Chat button
         lbl_chat_header.config(text=f"Currently chatting with: {selected_text}")
+        btn_leave.config(state=tk.NORMAL)
 
         # Clear the current chat area to blank (and to paste in current-selected-peer's chat history if there is any)
         chat_area.config(state="normal")
@@ -450,10 +485,10 @@ def start_gui(
             display_message(f"[{sender_name}]", text)
         # 2. If user is chatting with another peer (or haven't selected a peer to chat with)
         else:
-            # find the index of in selected_indices of the sender to update *unread* messages
+            # find the index of the sender to update *unread* messages
             for i in range(peer_listbox.size()):
                 item_text = peer_listbox.get(i)
-                if item_text.startswith(sender_name):
+                if extract_peer_name(item_text) == sender_name:
                     # count current unread messages
                     unread_count = 1
                     if "(" in item_text and item_text.endswith(")"):
@@ -466,9 +501,12 @@ def start_gui(
                     else:
                         base_text = item_text
 
-                    # Update unread message count
+                    # Update unread message count while keeping any current selection
+                    was_selected = i in peer_listbox.curselection()
                     peer_listbox.delete(i)
                     peer_listbox.insert(i, f"{base_text} ({unread_count})")
+                    if was_selected:
+                        peer_listbox.select_set(i)
                     break  # PREVENT CHECKING OTHER PEOPLE IF NAME IS FOUND
 
     # Bind left mouse click to Listbox elements
@@ -476,7 +514,11 @@ def start_gui(
 
     # ----------------- File sending progress controller -------------------
 
-    def update_file_progress(filename, percent, is_done=False):
+    def update_file_progress(filename, percent, is_done=False, action="Sending", error=False):
+        if error:
+            progress_frame.pack_forget()
+            return
+
         # show progress bar if hidden
         progress_frame.pack(fill=tk.X, pady=(0, 6), before=input_frame)
 
@@ -485,33 +527,44 @@ def start_gui(
 
         # update progress announcer
         if is_done or percent >= 100:
-            lbl_progress.config(
-                text=f"Finished sending file: {filename}, (100%)", fg="#2e7d32"
+            done_text = (
+                f"Saved to downloads/: {filename} (100%)"
+                if action == "Receiving"
+                else f"Finished sending file: {filename} (100%)"
             )
-            # use root.after to set a timer for 1 second then hide the progress bar
-            root.after(1000, progress_frame.pack_forget)
+            lbl_progress.config(text=done_text, fg="#2e7d32")
+            # use root.after to set a timer for 1.5 seconds then hide the progress bar
+            root.after(1500, progress_frame.pack_forget)
         else:
-            lbl_progress.config(text=f"Sending: {filename}, ({percent}%)", fg="#4a5568")
+            lbl_progress.config(text=f"{action}: {filename} ({percent}%)", fg="#4a5568")
 
     # ------------------ Automatic peer-list updater --------------------
 
     def add_or_update_peer(name, ip, port, status):
         peer_addresses[name] = (ip, port)  # Actual IP/Port of each peer
-        # Standardize string format, for example "Minh (192.168.1.12:6000) [Active]"
+        # Standardize string format, for example "Minh (192.168.1.12:6000) [online]"
         new_entry = f"{name} ({ip}:{port}) [{status}]"
 
-        # check if peer already existed  in Listbox
+        # check if peer already existed in Listbox
         found = False
         for i in range(peer_listbox.size()):
             item_text = peer_listbox.get(i)
-            if item_text.startswith(name):
+            if extract_peer_name(item_text) == name:
                 # keep the unread messages (for example: (2))
                 unread_part = ""
-                if item_text.endswith(")") and not item_text.endswith(f"[{status}]"):
-                    if "(" in item_text.rsplit("[", 1)[-1]:
+                if item_text.endswith(")"):
+                    tail = item_text.rsplit("]", 1)[-1]
+                    if "(" in tail:
                         unread_part = " " + item_text.rsplit(" ", 1)[-1]
-                peer_listbox.delete(i)
-                peer_listbox.insert(i, new_entry + unread_part)
+                updated_text = new_entry + unread_part
+                if item_text != updated_text:
+                    was_selected = i in peer_listbox.curselection()
+                    peer_listbox.delete(i)
+                    peer_listbox.insert(i, updated_text)
+                    if was_selected:
+                        peer_listbox.select_set(i)
+                    if current_chat_partner == name:
+                        lbl_chat_header.config(text=f"Currently chatting with: {new_entry}")
                 found = True
                 break
         # if new LAN peer then add to bottom of Listbox
@@ -522,10 +575,17 @@ def start_gui(
             )
 
     def remove_peer(name):
+        nonlocal current_chat_partner
         for i in range(peer_listbox.size()):
-            if peer_listbox.get(i).startswith(name):
+            if extract_peer_name(peer_listbox.get(i)) == name:
                 peer_listbox.delete(i)
                 peer_addresses.pop(name, None)
+                if current_chat_partner == name:
+                    current_chat_partner = None
+                    lbl_chat_header.config(
+                        text="Peer offline - select another peer to chat"
+                    )
+                    btn_leave.config(state=tk.DISABLED)
                 display_message("[System]", f"{name} has left the network.")
                 break
 
@@ -563,9 +623,16 @@ def start_gui(
                 # 4. Event from TCP flow: Update send/receive file progression
                 elif event_type == "file_progress":
                     update_file_progress(
-                        data["filename"], data["percent"], data.get("done", False)
+                        data["filename"],
+                        data["percent"],
+                        data.get("done", False),
+                        data.get("action", "Sending"),
+                        data.get("error", False),
                     )
-                # 5. Error events (connection lost, connection refused, file error)
+                # 5. Informational events
+                elif event_type == "system_info":
+                    display_message("[System]", data["message"])
+                # 6. Error events (connection lost, connection refused, file error)
                 elif event_type == "system_error":
                     display_message("[Error]", data["message"])
             except queue.Empty:

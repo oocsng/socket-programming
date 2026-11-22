@@ -1,9 +1,11 @@
 # Tkinter GUI and message queue
-import tkinter as tk
-from tkinter import ttk, scrolledtext, filedialog
+import ctypes
+import os
 import queue
 import random  # for port
 import sys
+import tkinter as tk
+from tkinter import ttk, scrolledtext, filedialog
 
 # -------- Login box -------------
 
@@ -211,7 +213,7 @@ def start_gui(
     peer_listbox = tk.Listbox(
         list_container,
         yscrollcommand=scrollbar.set,
-        font=("Segoe UI", 10),
+        font=("Segoe UI", 11),
         selectmode=tk.SINGLE,
     )
 
@@ -290,11 +292,57 @@ def start_gui(
 
     chat_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 5))
 
+    def open_file_path(path):
+        norm_path = os.path.normpath(os.path.abspath(path))
+        if os.path.exists(norm_path) and os.name == "nt":
+            try:
+                ole32 = ctypes.windll.ole32
+                shell32 = ctypes.windll.shell32
+                ole32.CoInitialize(None)
+                shell32.ILCreateFromPathW.argtypes = [ctypes.c_wchar_p]
+                shell32.ILCreateFromPathW.restype = ctypes.c_void_p
+                shell32.SHOpenFolderAndSelectItems.argtypes = [
+                    ctypes.c_void_p,
+                    ctypes.c_uint,
+                    ctypes.c_void_p,
+                    ctypes.c_uint,
+                ]
+                shell32.SHOpenFolderAndSelectItems.restype = ctypes.c_long
+                shell32.ILFree.argtypes = [ctypes.c_void_p]
+                pidl = shell32.ILCreateFromPathW(norm_path)
+                if pidl:
+                    try:
+                        hr = shell32.SHOpenFolderAndSelectItems(pidl, 0, None, 0)
+                    finally:
+                        shell32.ILFree(pidl)
+                    if hr == 0:
+                        return
+            except OSError:
+                pass
+        if os.path.isdir(os.path.dirname(norm_path)):
+            os.startfile(os.path.dirname(norm_path))
+
     # display_message function
 
-    def display_message(sender, message):
+    def display_message(sender, message, file_path=None):
         chat_area.config(state="normal")  # unlock for inserting dialogues
-        chat_area.insert(tk.END, f"{sender}: {message}\n")  # append at the end
+        chat_area.insert(tk.END, f"{sender}: {message}")
+        if file_path:
+            chat_area.insert(tk.END, "  ")
+            btn_open = tk.Button(
+                chat_area,
+                text="Open File Location",
+                command=lambda p=file_path: open_file_path(p),
+                font=("Segoe UI", 8, "bold"),
+                bg="#ebf8ff",
+                fg="#2b6cb0",
+                relief=tk.GROOVE,
+                cursor="hand2",
+                padx=6,
+                pady=1,
+            )
+            chat_area.window_create(tk.END, window=btn_open)
+        chat_area.insert(tk.END, "\n")  # append at the end
         chat_area.config(state="disabled")  # re-lock
         chat_area.see(tk.END)  # auto-scroll the latest line
 
@@ -451,6 +499,7 @@ def start_gui(
             # Update in Listbox
             peer_listbox.delete(index)
             peer_listbox.insert(index, clean_text)
+            peer_listbox.itemconfig(index, fg="#000000", bg="#ffffff")
             peer_listbox.select_set(index)
             selected_text = clean_text
 
@@ -465,8 +514,13 @@ def start_gui(
 
         # Paste in chat history of selected peer (if there is any)
         if partner_name in chat_histories:
-            for sender, msg in chat_histories[partner_name]:
-                display_message(sender, msg)
+            for item in chat_histories[partner_name]:
+                if len(item) == 3:
+                    sender, msg, fpath = item
+                    display_message(sender, msg, file_path=fpath)
+                else:
+                    sender, msg = item
+                    display_message(sender, msg)
         else:  # empty history
             chat_histories[partner_name] = []
             display_message(
@@ -505,6 +559,7 @@ def start_gui(
                     was_selected = i in peer_listbox.curselection()
                     peer_listbox.delete(i)
                     peer_listbox.insert(i, f"{base_text} ({unread_count})")
+                    peer_listbox.itemconfig(i, fg="#dc2626", bg="#fef2f2")
                     if was_selected:
                         peer_listbox.select_set(i)
                     break  # PREVENT CHECKING OTHER PEOPLE IF NAME IS FOUND
@@ -561,6 +616,10 @@ def start_gui(
                     was_selected = i in peer_listbox.curselection()
                     peer_listbox.delete(i)
                     peer_listbox.insert(i, updated_text)
+                    if unread_part:
+                        peer_listbox.itemconfig(i, fg="#dc2626", bg="#fef2f2")
+                    else:
+                        peer_listbox.itemconfig(i, fg="#000000", bg="#ffffff")
                     if was_selected:
                         peer_listbox.select_set(i)
                     if current_chat_partner == name:
@@ -631,7 +690,16 @@ def start_gui(
                     )
                 # 5. Informational events
                 elif event_type == "system_info":
-                    display_message("[System]", data["message"])
+                    fpath = data.get("file_path")
+                    peer = data.get("peer")
+                    if peer:
+                        if peer not in chat_histories:
+                            chat_histories[peer] = []
+                        chat_histories[peer].append(("[System]", data["message"], fpath))
+                        if peer == current_chat_partner or current_chat_partner is None:
+                            display_message("[System]", data["message"], file_path=fpath)
+                    else:
+                        display_message("[System]", data["message"], file_path=fpath)
                 # 6. Error events (connection lost, connection refused, file error)
                 elif event_type == "system_error":
                     display_message("[Error]", data["message"])

@@ -31,6 +31,8 @@ def recv_field(sock):
             return None
         if b == b"|":
             return buf.decode("utf-8", errors="replace")
+        if b in (b"\r", b"\n"):
+            raise ValueError("Ký tự không hợp lệ trong header")
         buf.extend(b)
         if len(buf) > MAX_FIELD_LEN:
             raise ValueError("Header quá dài")

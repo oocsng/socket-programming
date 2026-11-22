@@ -19,6 +19,8 @@ except ImportError:
 DOWNLOAD_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads"
 )
+HANDSHAKE_TIMEOUT = 5.0
+FILE_RECV_TIMEOUT = 10.0
 
 
 # ---------------------------------------------------------------- Framing helper
@@ -75,13 +77,17 @@ class PeerConnection:
         is_file_conn = False
         graceful_bye = False
         try:
+            self.sock.settimeout(HANDSHAKE_TIMEOUT)
             while True:
                 kind = recv_field(self.sock)
                 if kind is None:
                     break
+                if self.peer_name is None and kind != "HI":
+                    raise ValueError("Thiếu gói chào HI|")
                 if kind == "HI":
                     self.peer_name = recv_field(self.sock)
                     self.peer_port = int(recv_field(self.sock))
+                    self.sock.settimeout(None)
                     self.cb.get("on_peer_connected", lambda *a: None)(
                         self.peer_name, self.peer_ip, self.peer_port)
                 elif kind == "MSG":
@@ -111,16 +117,23 @@ class PeerConnection:
                     self.peer_name, graceful_bye)
 
     def _receive_file(self):
-        filename = _safe_name(recv_field(self.sock) or "")
-        size = int(recv_field(self.sock))
-        peer_dir = os.path.join(DOWNLOAD_DIR, _safe_name(self.peer_name or "unknown"))
-        os.makedirs(peer_dir, exist_ok=True)
-        final_path = os.path.join(peer_dir, filename)
-        part_path = final_path + ".part"
         on_progress = self.cb.get("on_file_progress", lambda *a: None)
-
+        filename = "unknown"
+        part_path = None
         received = 0
         try:
+            self.sock.settimeout(FILE_RECV_TIMEOUT)
+            raw_name = recv_field(self.sock)
+            raw_size = recv_field(self.sock)
+            if raw_name is None or raw_size is None:
+                raise ConnectionError("Thiếu header kích thước file")
+            filename = _safe_name(raw_name)
+            size = int(raw_size)
+            peer_dir = os.path.join(DOWNLOAD_DIR, _safe_name(self.peer_name or "unknown"))
+            os.makedirs(peer_dir, exist_ok=True)
+            final_path = os.path.join(peer_dir, filename)
+            part_path = final_path + ".part"
+
             with open(part_path, "wb") as f:
                 while received < size:
                     data = recv_exact(self.sock, min(CHUNK_SIZE, size - received))
@@ -133,7 +146,7 @@ class PeerConnection:
 
             os.replace(part_path, final_path)  # đủ 100% mới đổi tên
         except (OSError, ValueError):
-            if os.path.exists(part_path):
+            if part_path and os.path.exists(part_path):
                 try:
                     os.remove(part_path)
                 except OSError:
@@ -269,10 +282,10 @@ class TCPServer:
 
     def _send_file_worker(self, ip, port, filepath, on_progress):
         filename = _safe_name(os.path.basename(filepath))
-        size = os.path.getsize(filepath)
         try:
+            size = os.path.getsize(filepath)
             with socket.create_connection((ip, port), timeout=5) as s:
-                s.settimeout(None)
+                s.settimeout(FILE_RECV_TIMEOUT)
                 s.sendall(f"HI|{self.my_name}|{self.port}|".encode("utf-8"))
                 s.sendall(f"FILE|{filename}|{size}|".encode("utf-8"))
                 sent = 0

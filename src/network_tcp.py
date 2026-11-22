@@ -5,45 +5,23 @@ Giao thức (mỗi gói bắt đầu bằng 1 từ khóa, các trường ngăn c
     HI|<tên>|<cổng_tcp>|
     MSG|<độ_dài_byte>|<nội_dung>
     FILE|<tên_file>|<kích_thước_byte>|<luồng byte nhị phân>
+    BYE|
 """
 import os
 import socket
 import threading
 
-CHUNK_SIZE = 32 * 1024          # 32 KB mỗi khối
+try:
+    from .protocol import CHUNK_SIZE, MAX_FIELD_LEN, recv_exact, recv_field
+except ImportError:
+    from protocol import CHUNK_SIZE, MAX_FIELD_LEN, recv_exact, recv_field
+
 DOWNLOAD_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads"
 )
-MAX_FIELD_LEN = 1024            # chặn header dài bất thường
 
 
-# ---------------------------------------------------------------- Framing
-def recv_exact(sock, n):
-    """Đọc ĐÚNG n byte (xử lý bài toán rách/dính gói của TCP).
-    Trả về None nếu đối phương đóng kết nối giữa chừng."""
-    buf = bytearray()
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
-        if not chunk:
-            return None
-        buf.extend(chunk)
-    return bytes(buf)
-
-
-def recv_field(sock):
-    """Đọc từng byte cho tới khi gặp '|', trả về chuỗi (không gồm '|')."""
-    buf = bytearray()
-    while True:
-        b = recv_exact(sock, 1)
-        if b is None:
-            return None
-        if b == b"|":
-            return buf.decode("utf-8", errors="replace")
-        buf.extend(b)
-        if len(buf) > MAX_FIELD_LEN:
-            raise ValueError("Header quá dài")
-
-
+# ---------------------------------------------------------------- Framing helper
 def _safe_name(name):
     """Chống path traversal và ký tự không hợp lệ trên Windows."""
     cleaned = os.path.basename(name.replace("\\", "/"))
@@ -66,6 +44,7 @@ class PeerConnection:
         self.peer_port = None
         self.peer_ip = sock.getpeername()[0]
         self._send_lock = threading.Lock()
+        self._local_closed = False
 
     # --- gửi
     def _send(self, data):
@@ -79,6 +58,12 @@ class PeerConnection:
         body = text.encode("utf-8")
         self._send(f"MSG|{len(body)}|".encode("utf-8") + body)
 
+    def send_bye(self):
+        try:
+            self._send(b"BYE|")
+        except OSError:
+            pass
+
     def close(self):
         try:
             self.sock.close()
@@ -87,6 +72,8 @@ class PeerConnection:
 
     # --- nhận (chạy trong luồng riêng)
     def receive_loop(self):
+        is_file_conn = False
+        graceful_bye = False
         try:
             while True:
                 kind = recv_field(self.sock)
@@ -98,6 +85,7 @@ class PeerConnection:
                     self.cb.get("on_peer_connected", lambda *a: None)(
                         self.peer_name, self.peer_ip, self.peer_port)
                 elif kind == "MSG":
+                    self.cb.get("_on_chat_active", lambda *a: None)(self)
                     length = int(recv_field(self.sock))
                     data = recv_exact(self.sock, length)
                     if data is None:
@@ -105,15 +93,22 @@ class PeerConnection:
                     self.cb.get("on_message", lambda *a: None)(
                         self.peer_name, data.decode("utf-8", errors="replace"))
                 elif kind == "FILE":
+                    is_file_conn = True
                     if not self._receive_file():
                         break
+                elif kind == "BYE":
+                    graceful_bye = True
+                    break
                 else:
                     break  # gói lạ -> ngắt kết nối
         except (OSError, ValueError):
             pass
         finally:
             self.close()
-            self.cb.get("on_peer_disconnected", lambda *a: None)(self.peer_name)
+            self.cb.get("_on_conn_closed", lambda *a: None)(self)
+            if not is_file_conn and not self._local_closed and self.peer_name:
+                self.cb.get("on_peer_disconnected", lambda *a: None)(
+                    self.peer_name, graceful_bye)
 
     def _receive_file(self):
         filename = _safe_name(recv_field(self.sock) or "")
@@ -178,8 +173,12 @@ class TCPServer:
         except OSError:
             pass
         with self._lock:
-            for p in self.peers.values():
-                p.close()
+            conns = list(self.peers.values())
+            self.peers.clear()
+        for p in conns:
+            p._local_closed = True
+            p.send_bye()
+            p.close()
 
     def _accept_loop(self):
         while self._running:
@@ -191,27 +190,27 @@ class TCPServer:
             try:
                 peer.send_hello()
             except OSError:
+                peer.close()
                 continue
             threading.Thread(target=peer.receive_loop, daemon=True).start()
 
     def _wrap_cb(self):
-        """Bọc callback để lưu peer vào danh sách khi bắt tay xong."""
+        """Bọc callback để lưu peer khi nhận chat và dọn khi đóng kết nối."""
         cb = dict(self.cb)
-        orig_connected = self.cb.get("on_peer_connected", lambda *a: None)
-        orig_disc = self.cb.get("on_peer_disconnected", lambda *a: None)
 
-        def on_connected(name, ip, port):
-            orig_connected(name, ip, port)
-
-        def on_disconnected(name):
+        def on_chat_active(conn):
+            if conn.peer_port is None:
+                return
             with self._lock:
-                for k in [k for k, v in self.peers.items()
-                          if v.peer_name == name]:
-                    self.peers.pop(k, None)
-            orig_disc(name)
+                self.peers.setdefault((conn.peer_ip, conn.peer_port), conn)
 
-        cb["on_peer_connected"] = on_connected
-        cb["on_peer_disconnected"] = on_disconnected
+        def on_conn_closed(conn):
+            with self._lock:
+                for k in [k for k, v in self.peers.items() if v is conn]:
+                    self.peers.pop(k, None)
+
+        cb["_on_chat_active"] = on_chat_active
+        cb["_on_conn_closed"] = on_conn_closed
         return cb
 
     # --- phía chủ động kết nối
@@ -221,7 +220,7 @@ class TCPServer:
         with self._lock:
             if key in self.peers:
                 return self.peers[key]
-        sock = socket.create_connection((ip, port), timeout=5)
+        sock = socket.create_connection((ip, port), timeout=3)
         sock.settimeout(None)
         peer = PeerConnection(sock, self.my_name, self.port, self._wrap_cb())
         peer.send_hello()
@@ -231,7 +230,35 @@ class TCPServer:
         return peer
 
     def send_message(self, ip, port, text):
-        self.connect_to_peer(ip, port).send_message(text)
+        conn = self.connect_to_peer(ip, port)
+        try:
+            conn.send_message(text)
+        except OSError:
+            conn._local_closed = True
+            with self._lock:
+                for k in [k for k, v in self.peers.items() if v is conn]:
+                    self.peers.pop(k, None)
+            conn.close()
+            raise
+
+    def leave_peer(self, ip, port, peer_name=None):
+        """Gửi BYE| và đóng kết nối chat tới peer."""
+        conns = []
+        key = (ip, int(port))
+        with self._lock:
+            conn = self.peers.pop(key, None)
+            if conn:
+                conns.append(conn)
+            if peer_name:
+                for k in [k for k, v in self.peers.items()
+                          if v.peer_name == peer_name]:
+                    c = self.peers.pop(k, None)
+                    if c:
+                        conns.append(c)
+        for conn in conns:
+            conn._local_closed = True
+            conn.send_bye()
+            conn.close()
 
     # --- gửi file: kết nối TCP độc lập, luồng riêng
     def send_file(self, ip, port, filepath, on_progress=None):
@@ -293,4 +320,4 @@ if __name__ == "__main__":
     a.send_message("127.0.0.1", b.port, "Xin chào Bob!")
     time.sleep(0.5)
     a.send_file("127.0.0.1", b.port, __file__)
-    time.sleep(1)# TCP Chat and File Transfer
+    time.sleep(1)

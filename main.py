@@ -79,10 +79,31 @@ def main():
             )
         )
 
+    def on_tcp_peer_disconnected(peer_name, graceful=False):
+        if peer_name:
+            if graceful:
+                event_queue.put(
+                    (
+                        "system_info",
+                        {
+                            "message": f"{peer_name} left the chat.",
+                            "peer": peer_name,
+                        },
+                    )
+                )
+            else:
+                event_queue.put(
+                    (
+                        "system_error",
+                        {"message": f"Connection lost with {peer_name}."},
+                    )
+                )
+
     tcp_callbacks = {
         "on_message": on_tcp_message,
         "on_file_progress": on_tcp_file_progress,
         "on_file_done": on_tcp_file_done,
+        "on_peer_disconnected": on_tcp_peer_disconnected,
     }
 
     # 4. Start TCP Server (Member B)
@@ -213,15 +234,12 @@ def main():
 
     def handle_leave_chat(partner_name, partner_addr):
         if partner_addr:
-            key = (partner_addr[0], int(partner_addr[1]))
-            with tcp_server._lock:
-                conn = tcp_server.peers.pop(key, None)
-            if conn:
-                conn.close()
+            tcp_server.leave_peer(partner_addr[0], int(partner_addr[1]), partner_name)
 
     def handle_close():
         nonlocal running
         running = False
+        discovery.stop()
         tcp_server.stop()
 
     # 7. Launch GUI

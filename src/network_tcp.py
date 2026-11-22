@@ -11,7 +11,9 @@ import socket
 import threading
 
 CHUNK_SIZE = 32 * 1024          # 32 KB mỗi khối
-DOWNLOAD_DIR = "downloads"
+DOWNLOAD_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads"
+)
 MAX_FIELD_LEN = 1024            # chặn header dài bất thường
 
 
@@ -43,8 +45,12 @@ def recv_field(sock):
 
 
 def _safe_name(name):
-    """Chống path traversal: chỉ giữ tên file, bỏ '|'."""
-    return os.path.basename(name.replace("|", "_")) or "unnamed"
+    """Chống path traversal và ký tự không hợp lệ trên Windows."""
+    cleaned = os.path.basename(name.replace("\\", "/"))
+    for ch in '<>:"/\\|?*':
+        cleaned = cleaned.replace(ch, "_")
+    cleaned = cleaned.strip()
+    return "unnamed" if cleaned in ("", ".", "..") else cleaned
 
 
 # ---------------------------------------------------------------- Kết nối
@@ -112,24 +118,34 @@ class PeerConnection:
     def _receive_file(self):
         filename = _safe_name(recv_field(self.sock) or "")
         size = int(recv_field(self.sock))
-        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-        final_path = os.path.join(DOWNLOAD_DIR, filename)
+        peer_dir = os.path.join(DOWNLOAD_DIR, _safe_name(self.peer_name or "unknown"))
+        os.makedirs(peer_dir, exist_ok=True)
+        final_path = os.path.join(peer_dir, filename)
         part_path = final_path + ".part"
         on_progress = self.cb.get("on_file_progress", lambda *a: None)
 
         received = 0
-        with open(part_path, "wb") as f:
-            while received < size:
-                data = recv_exact(self.sock, min(CHUNK_SIZE, size - received))
-                if data is None:
-                    on_progress(self.peer_name, filename, -1)  # lỗi/đứt
-                    return False
-                f.write(data)
-                received += len(data)
-                on_progress(self.peer_name, filename,
-                            100 if size == 0 else received * 100 // size)
+        try:
+            with open(part_path, "wb") as f:
+                while received < size:
+                    data = recv_exact(self.sock, min(CHUNK_SIZE, size - received))
+                    if data is None:
+                        raise ConnectionError("Sender closed before file completed")
+                    f.write(data)
+                    received += len(data)
+                    on_progress(self.peer_name, filename,
+                                100 if size == 0 else received * 100 // size)
 
-        os.replace(part_path, final_path)  # đủ 100% mới đổi tên
+            os.replace(part_path, final_path)  # đủ 100% mới đổi tên
+        except (OSError, ValueError):
+            if os.path.exists(part_path):
+                try:
+                    os.remove(part_path)
+                except OSError:
+                    pass
+            on_progress(self.peer_name, filename, -1)  # lỗi/đứt
+            return False
+
         self.cb.get("on_file_done", lambda *a: None)(
             self.peer_name, final_path)
         return True
@@ -245,6 +261,15 @@ class TCPServer:
                                         100 if size == 0 else sent * 100 // size)
                 if on_progress and size == 0:
                     on_progress(filename, 100)
+                # Half-close write side and drain peer's HI greeting until FIN so
+                # Winsock does not emit a TCP RST that truncates large transfers.
+                s.shutdown(socket.SHUT_WR)
+                s.settimeout(5.0)
+                try:
+                    while s.recv(1024):
+                        pass
+                except OSError:
+                    pass
         except OSError:
             if on_progress:
                 on_progress(filename, -1)   # -1 = lỗi

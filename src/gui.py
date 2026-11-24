@@ -3,7 +3,6 @@ import ctypes
 import os
 import queue
 import random  # for port
-import sys
 import tkinter as tk
 from tkinter import ttk, scrolledtext, filedialog
 
@@ -225,10 +224,6 @@ def start_gui(
 
     peer_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-    # Placeholder online peers initialize (Name (ip:tcp_port) [Status] (Unread msgs))
-    # peer_listbox.insert(tk.END, "Minh (192.168.1.12:6000) [Active] (2)")
-    # peer_listbox.insert(tk.END, "Huy (192.168.1.20:5000) [Away]")
-
     # ----------- Right frame: Chat box ---------------------
 
     header_frame = tk.Frame(right_frame, bg="#ffffff")
@@ -346,14 +341,6 @@ def start_gui(
         chat_area.config(state="disabled")  # re-lock
         chat_area.see(tk.END)  # auto-scroll the latest line
 
-    # placeholder conversation
-
-    # display_message(
-    #     "[14:20] Minh", "Hey Quan, have you finished preparing the report file yet?"
-    # )
-    # display_message("[14:21] You", "I have, want me to send it to you?")
-    # display_message("[System]", "Minh is ready to receive the file...")
-
     # ---------- Bottom layer (File sending and input bar)--------------
     bottom_container = tk.Frame(right_frame, bg="#ffffff")
     bottom_container.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 10))
@@ -447,22 +434,8 @@ def start_gui(
     # -------------- Chat history and peer selection --------------------
 
     # Implement *Dictionary* to store each peer's chat history
-    # Structure: { "Name": [list of messages]}
-
-    chat_histories = {  ## placeholders
-        # "Minh": [
-        #     (
-        #         "[14:20] Minh",
-        #         "Hey Quan, have you finished preparing the report file yet?",
-        #     ),
-        #     ("[14:21] You", "I have, want me to send it to you?"),
-        #     ("[System]", "Minh is ready to receive the file..."),
-        # ],
-        # "Huy": [
-        #     ("[13:00] Huy", "Chào Quan, chiều nay mấy giờ nhóm mình họp thế?"),
-        #     ("[13:02] You", "Tầm 3 giờ chiều nhé Huy!"),
-        # ],
-    }
+    # Structure: {"Name": [(sender, text), ...]}
+    chat_histories = {}
 
     peer_addresses = {}  # Save {"Name": (ip,port)} to know where to TCP is sent to
 
@@ -707,34 +680,6 @@ def start_gui(
                 break  # quit after having finished all elements in queue
         # auto-call this function again after 100ms
         root.after(100, check_queue)
-
-        # # placeholder test-------------------------------------
-        # root.after(
-        #     2000,
-        #     lambda: event_queue.put(
-        #         (
-        #             "peer_update",
-        #             {"name": "Lan", "ip": "192.168.1.30", "port": 7000, "status": "Active"},
-        #         )
-        #     ),
-        # )
-        # # Sau 4 giây: Giả lập Bạn B nhận được tin nhắn từ "Huy" (bạn sẽ thấy số chưa đọc của Huy nhảy lên (1))
-        # root.after(
-        #     4000,
-        #     lambda: event_queue.put(
-        #         (
-        #             "new_message",
-        #             {"sender": "Huy", "text": "Quan ơi nhận được tin nhắn qua Queue chưa?"},
-        #         )
-        #     ),
-        # )
-        # # Sau 6 giây: Giả lập Bạn B đang truyền file đạt 80%
-        # root.after(
-        #     6000,
-        #     lambda: event_queue.put(
-        #         ("file_progress", {"filename": "demo_socket.zip", "percent": 80, "done": False})
-        #     ),
-        # )
 
     # Start the queue check
     check_queue()

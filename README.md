@@ -12,8 +12,9 @@
 │   ├── network_tcp.py     # TCP Server/Client, chat, truyền file & BYE| (Thành viên B)
 │   └── gui.py             # Hộp thoại Login, GUI Tkinter 2 cột & check_queue() (Thành viên C)
 ├── main.py                # Điểm khởi chạy chính, kết nối discovery, TCPServer và GUI
-├── downloads/             # Thư mục lưu tệp nhận theo từng peer (downloads/<tên_peer>/)
-├── docs/                  # Đề bài, rubric và tài liệu tham khảo
+├── docs/                  # Đề bài, rubric và tài liệu hướng dẫn đồ án
+├── downloads/             # Tự động tạo khi nhận tệp (lưu theo từng peer: downloads/<tên_peer>/)
+├── .gitignore             # Bỏ qua __pycache__, downloads/, .vscode/ và tệp hệ thống
 └── README.md              # Hướng dẫn cài đặt, chạy và kiểm thử
 ```
 
